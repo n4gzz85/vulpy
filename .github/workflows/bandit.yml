@@ -2,6 +2,8 @@ name: Bandit Security Scan
 
 on:
   pull_request:
+    paths:
+      - '**/*.py'  # Only trigger the workflow when Python files are changed
 
 jobs:
   security-scan:
@@ -16,19 +18,33 @@ jobs:
       - name: Install Bandit
         run: pip install bandit
 
-      - name: Run Bandit with proper severity check
+      - name: Fetch the base branch (main)
+        run: |
+          git fetch origin main
+
+      - name: Get the list of changed Python files
+        id: get_changed_files
+        run: |
+          CHANGED_FILES=$(git diff --name-only origin/main...HEAD | grep '\.py$')
+          echo "CHANGED_FILES=$CHANGED_FILES" >> $GITHUB_ENV
+          
+      - name: Run Bandit on changed files only
         id: bandit
         continue-on-error: true
         run: |
-          bandit -r . -s high -f json -o bandit_results.json || cat bandit_results.json
-          echo "exit_code=$?" >> $GITHUB_OUTPUT
+          if [ -z "$CHANGED_FILES" ]; then
+            echo "No Python files have been changed."
+            exit 0
+          else
+            bandit $CHANGED_FILES -s high -f json -o bandit_results.json
+          fi
+          echo "exit_code=$?" >> $GITHUB_ENV
 
       - name: Check for high vulnerabilities
         id: check_vulns
         run: |
           HIGH_COUNT=$(jq '[.results[] | select(.issue_severity == "HIGH")] | length' bandit_results.json)
           echo "HIGH_COUNT=$HIGH_COUNT" >> $GITHUB_ENV
-          echo "count=$HIGH_COUNT" >> $GITHUB_OUTPUT
 
       - name: Post Block Comment
         if: env.HIGH_COUNT != '0'
@@ -39,9 +55,9 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: 'BLOCKED'
+              body: 'BLOCKED due to high-severity vulnerabilities.'
             })
-            core.setFailed('Blocking merge due to vulnerabilities')
+            core.setFailed('Blocking merge due to high vulnerabilities')
 
       - name: Post Success Comment
         if: env.HIGH_COUNT == '0'
@@ -52,7 +68,7 @@ jobs:
               issue_number: context.issue.number,
               owner: context.repo.owner,
               repo: context.repo.repo,
-              body: 'Successful'
+              body: 'Successful! No high vulnerabilities detected.'
             })
 
   auto-merge:
