@@ -14,7 +14,6 @@ def authenticate_user():
         return False
 
 def generate_new_api_key():
-  
   try:
     user_input = input("Enter a  number: ")
     new_api_key = hashlib.sha256(str(user_input).encode()).hexdigest()
